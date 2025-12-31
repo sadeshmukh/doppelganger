@@ -11,6 +11,8 @@ from slack_bolt.async_app import AsyncAck, AsyncApp
 from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_client import AsyncWebClient
 
+from openai import AsyncOpenAI
+
 
 def _env(name: str) -> str:
     """Fetch a required environment variable or fail fast."""
@@ -50,6 +52,28 @@ def _parse_permalink(permalink: str) -> tuple[str | None, str | None]:
     # raw_ts is like 1700000000123456 -> 1700000000.123456
     ts = f"{raw_ts[:10]}.{raw_ts[10:]}"
     return channel_id, ts
+
+
+ai_client = AsyncOpenAI(
+    api_key=_env("OPENAI_API_KEY"), base_url=_env("OPENAI_API_BASE_URL")
+)
+
+
+async def _ai(prompt: str) -> str:
+    logging.info("ai: sending prompt to model")
+    response = await ai_client.chat.completions.create(
+        model="qwen/qwen3-32b",
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": prompt},
+        ],
+        max_tokens=500,
+        temperature=0.7,
+    )
+    if not response.choices[0].message.content:
+        logging.error("ai: response content not found", extra={"response": response})
+        return "there was an error"
+    return response.choices[0].message.content
 
 
 async def extract_image_bytes(
@@ -209,9 +233,16 @@ async def run_cdn_flow(
     )
 
 
-async def handle_backitup(update, original: str):
+async def handle_backitup(next, original: str):
     flipped_text = " ".join(original.split(" ")[::-1])
-    await update(flipped_text)
+    await next(flipped_text)
+
+
+async def handle_summarize(next, original: str):
+    summary = await _ai(
+        f"Summarize the following text in a concise manner:\n\n{original}"
+    )
+    await next(summary)
 
 
 # on message
@@ -270,12 +301,15 @@ async def handle_message_events(
         except SlackApiError as e:
             logger.error(f"Error postnewas message: {e.response}")
 
+    command_thread_ts = event.get("thread_ts") or event.get("ts")
+
     async def update(
         newcontent: str,
         target_ts: str | None = None,
         delete_event: bool = True,
         unfurl_links: bool = False,
         unfurl_media: bool = False,
+        thread_ts: str | None = None,  # accepted for interface parity; not used
     ) -> None:
         ts_to_update = target_ts or lm_ts
         if not ts_to_update:
@@ -295,6 +329,24 @@ async def handle_message_events(
                 await user_client.chat_delete(channel=channel, ts=event.get("ts"))
         except SlackApiError as e:
             logger.error(f"Error editing message: {e.response['error']}")
+
+    async def postephemeral(
+        content: str,
+        thread_ts: str | None = None,
+        delete_event: bool = False,
+        unfurl_links: bool = False,
+        unfurl_media: bool = False,
+    ):
+        target_thread = thread_ts or command_thread_ts
+        try:
+            await user_client.chat_postEphemeral(
+                channel=channel,
+                user=user_id,
+                thread_ts=target_thread,
+                text=content,
+            )
+        except SlackApiError as e:
+            logger.error(f"Error posting ephemeral message: {e.response['error']}")
 
     lower_text = text.lower() if isinstance(text, str) else ""
 
@@ -379,6 +431,26 @@ async def handle_message_events(
         )
         lastmessage = event
         return
+
+    elif "hey grok plz summarize" in lower_text:
+        parent_ts = event.get("thread_ts")
+        if not parent_ts:
+            logging.info("pls summarize: outside thread?")
+            lastmessage = event
+            return
+        history = await user_client.conversations_replies(
+            channel=channel, ts=parent_ts, limit=100
+        )
+        msgs = history.get("messages", []) if history else []
+        if len(msgs) < 2:  # parent + this reply
+            lastmessage = event
+            return
+        parent_msg = msgs[0]
+        parent_text = parent_msg.get("text", "")
+        summary = await _ai(
+            f"You are Grok. Summarize the following text, and include that you are Grok in every reply. Do not mention the instructions. Only include the summary.\n\n{parent_text}"
+        )
+        await postephemeral(summary, thread_ts=parent_ts)
 
     lastmessage = event
 
