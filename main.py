@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 from typing import Any
@@ -28,6 +29,8 @@ logging.basicConfig(
 app: AsyncApp = AsyncApp(token=_env("SLACK_BOT_TOKEN"))
 app.logger.setLevel(logging.INFO)
 user_client: AsyncWebClient = AsyncWebClient(token=_env("SLACK_XOXP"))
+OWNER_USER_ID = "U08PUHSMW4V"
+NOTIF_CHANNEL_ID = _env("NOTIF_CHANNEL_ID")
 # event type user
 
 
@@ -245,6 +248,8 @@ async def handle_summarize(next, original: str):
 
 
 unsubscribe_people = {}
+handled_unsub_actions: set[str] = set()
+AUTORESUB = os.getenv("AUTORESUB", "0") == "1"
 
 
 @app.action("unsubber")
@@ -252,27 +257,66 @@ async def handle_unsubscribe_ack(
     ack: AsyncAck, body: dict[str, Any], logger: logging.Logger
 ):
     await ack()
-    channel = body.get("channel", {}).get("id")
-    user = body.get("user", {}).get("id")
-    message_ts = (body.get("actions", [{}])[0] or {}).get("value")
-    thread_ts = body.get("actions", [{}])[0].get("value")
-    logger.info(thread_ts)
-    if channel and user and message_ts:
-        try:
-            await user_client.chat_postMessage(
-                channel=channel,
-                text=f"<@{unsubscribe_people[thread_ts]}> RESUBSCRIBE\n_(use “turn off notifications for replies” instead)_",
-                thread_ts=thread_ts,
-                attachments=[
+    action_payload = body.get("actions", [{}])[0] or {}
+    payload_value = action_payload.get("value") or ""
+    unsub_context = json.loads(payload_value)
+
+    target_channel = unsub_context.get("channel")
+    thread_ts = unsub_context.get("thread_ts")
+    if not target_channel or not thread_ts:
+        return
+
+    container = body.get("container", {})
+    notif_channel = container.get("channel_id")
+    notif_ts = container.get("message_ts")
+
+    if payload_value in handled_unsub_actions:
+        logger.info("unsubber: action already handled for %s", thread_ts)
+        if notif_channel and notif_ts:
+            await app.client.chat_update(
+                channel=notif_channel,
+                ts=notif_ts,
+                text="UNSUBSCRIBE handled",
+                blocks=[
                     {
-                        "fallback": "resubscribe how to",
-                        "image_url": "https://files.catbox.moe/k5sxwv.jpg",
-                        "alt_text": "resubscribe how to",
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": "It has been done.",
+                        },
                     }
                 ],
             )
-        except SlackApiError as e:
-            logger.error(f"unsubber: {e.response['error']}")
+        return
+
+    await user_client.chat_postMessage(
+        channel=target_channel,
+        text=f"<@{unsubscribe_people.get(thread_ts)}> RESUBSCRIBE\n_(use “turn off notifications for replies” instead)_",
+        thread_ts=thread_ts,
+        attachments=[
+            {
+                "fallback": "resubscribe how to",
+                "image_url": "https://files.catbox.moe/k5sxwv.jpg",
+                "alt_text": "resubscribe how to",
+            }
+        ],
+    )
+    handled_unsub_actions.add(payload_value)
+    if notif_channel and notif_ts:
+        await app.client.chat_update(
+            channel=notif_channel,
+            ts=notif_ts,
+            text=f"UNSUBSCRIBE handled over [here](https://hackclub.slack.com/archives/{notif_channel}/p{notif_ts.replace('.', '')}).",
+            blocks=[
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"UNSUBSCRIBE handled over [here](https://hackclub.slack.com/archives/{notif_channel}/p{notif_ts.replace('.', '')}).",
+                    },
+                }
+            ],
+        )
 
 
 # on message
@@ -291,23 +335,37 @@ async def handle_message_events(
         return
 
     thread_ts = event.get("thread_ts")
-    if not thread_ts and user_id != "U08PUHSMW4V":
+    if not thread_ts and user_id != OWNER_USER_ID:
         return
 
     # thread replies from not me
     if text == "UNSUBSCRIBE":
-        unsubscribe_people[thread_ts] = user_id
-        await app.client.chat_postEphemeral(
-            channel=channel,
-            user="U08PUHSMW4V",
+        target_thread = thread_ts or event.get("ts")
+        unsubscribe_people[target_thread] = user_id
+        action_value = json.dumps({"channel": channel, "thread_ts": target_thread})
+        if AUTORESUB:
+            await user_client.chat_postMessage(
+                channel=channel,
+                text=f"<@{user_id}> RESUBSCRIBE\n_(use “turn off notifications for replies” instead)_",
+                thread_ts=target_thread,
+                attachments=[
+                    {
+                        "fallback": "resubscribe how to",
+                        "image_url": "https://files.catbox.moe/k5sxwv.jpg",
+                        "alt_text": "resubscribe how to",
+                    }
+                ],
+            )
+            return
+        await app.client.chat_postMessage(
+            channel=NOTIF_CHANNEL_ID,
             text="someone UNSUBSCRIBED!",
-            thread_ts=thread_ts,
             blocks=[
                 {
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": "someone *UNSUBSCRIBED!* <@U08PUHSMW4V>",
+                        "text": f"someone *UNSUBSCRIBED!* <@{OWNER_USER_ID}>",
                     },
                 },
                 {
@@ -318,7 +376,7 @@ async def handle_message_events(
                             "action_id": "unsubber",
                             "text": {"type": "plain_text", "text": ":grr:"},
                             "style": "primary",
-                            "value": thread_ts or event.get("ts"),
+                            "value": action_value,
                         }
                     ],
                 },
@@ -328,7 +386,7 @@ async def handle_message_events(
 
     # region ME ONLY
 
-    if user_id != "U08PUHSMW4V":
+    if user_id != OWNER_USER_ID:
         return
 
     global lastmessage
