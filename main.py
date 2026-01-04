@@ -334,20 +334,19 @@ async def handle_message_events(
     if not isinstance(user_id, str):
         return
 
-    thread_ts = event.get("thread_ts")
+    thread_ts = event.get("thread_ts") or event.get("ts")
     if not thread_ts and user_id != OWNER_USER_ID:
         return
 
     # thread replies from not me
     if text == "UNSUBSCRIBE":
-        target_thread = thread_ts or event.get("ts")
-        unsubscribe_people[target_thread] = user_id
-        action_value = json.dumps({"channel": channel, "thread_ts": target_thread})
+        unsubscribe_people[thread_ts] = user_id
+        action_value = json.dumps({"channel": channel, "thread_ts": thread_ts})
         if AUTORESUB:
             await user_client.chat_postMessage(
                 channel=channel,
                 text=f"<@{user_id}> RESUBSCRIBE\n_(use “turn off notifications for replies” instead)_",
-                thread_ts=target_thread,
+                thread_ts=thread_ts,
                 attachments=[
                     {
                         "fallback": "resubscribe how to",
