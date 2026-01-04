@@ -1,0 +1,21 @@
+services:
+  slackpoint:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: slackpoint-bot
+    restart: unless-stopped
+    environment:
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
+      - SLACK_APP_TOKEN=${SLACK_APP_TOKEN}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - SLACK_XOXP=${SLACK_XOXP}
+      - OPENAI_API_BASE_URL=${OPENAI_API_BASE_URL}
+      - NOTIF_CHANNEL_ID=${NOTIF_CHANNEL_ID}
+      - AUTORESUB=${AUTORESUB}
+    healthcheck:
+      test: ["CMD", "uv", "run", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
