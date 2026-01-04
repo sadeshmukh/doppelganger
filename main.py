@@ -15,7 +15,6 @@ from openai import AsyncOpenAI
 
 
 def _env(name: str) -> str:
-    """Fetch a required environment variable or fail fast."""
     if not (value := os.getenv(name)):
         raise RuntimeError(f"Missing required env var: {name}")
     return value
@@ -245,6 +244,37 @@ async def handle_summarize(next, original: str):
     await next(summary)
 
 
+unsubscribe_people = {}
+
+
+@app.action("unsubber")
+async def handle_unsubscribe_ack(
+    ack: AsyncAck, body: dict[str, Any], logger: logging.Logger
+):
+    await ack()
+    channel = body.get("channel", {}).get("id")
+    user = body.get("user", {}).get("id")
+    message_ts = (body.get("actions", [{}])[0] or {}).get("value")
+    thread_ts = body.get("actions", [{}])[0].get("value")
+    logger.info(thread_ts)
+    if channel and user and message_ts:
+        try:
+            await user_client.chat_postMessage(
+                channel=channel,
+                text=f"<@{unsubscribe_people[thread_ts]}> RESUBSCRIBE\n_(use “turn off notifications for replies” instead)_",
+                thread_ts=thread_ts,
+                attachments=[
+                    {
+                        "fallback": "resubscribe how to",
+                        "image_url": "https://files.catbox.moe/k5sxwv.jpg",
+                        "alt_text": "resubscribe how to",
+                    }
+                ],
+            )
+        except SlackApiError as e:
+            logger.error(f"unsubber: {e.response['error']}")
+
+
 # on message
 @app.event("message")
 async def handle_message_events(
@@ -259,6 +289,44 @@ async def handle_message_events(
 
     if not isinstance(user_id, str):
         return
+
+    thread_ts = event.get("thread_ts")
+    if not thread_ts and user_id != "U08PUHSMW4V":
+        return
+
+    # thread replies from not me
+    if text == "UNSUBSCRIBE":
+        unsubscribe_people[thread_ts] = user_id
+        await app.client.chat_postEphemeral(
+            channel=channel,
+            user="U08PUHSMW4V",
+            text="someone UNSUBSCRIBED!",
+            thread_ts=thread_ts,
+            blocks=[
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": "someone *UNSUBSCRIBED!* <@U08PUHSMW4V>",
+                    },
+                },
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "action_id": "unsubber",
+                            "text": {"type": "plain_text", "text": ":grr:"},
+                            "style": "primary",
+                            "value": thread_ts or event.get("ts"),
+                        }
+                    ],
+                },
+            ],
+        )
+        return
+
+    # region ME ONLY
 
     if user_id != "U08PUHSMW4V":
         return
@@ -453,6 +521,7 @@ async def handle_message_events(
         await postephemeral(summary, thread_ts=parent_ts)
 
     lastmessage = event
+    # endregion ME ONLY
 
 
 async def main() -> None:
