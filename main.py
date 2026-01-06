@@ -252,6 +252,45 @@ handled_unsub_actions: set[str] = set()
 AUTORESUB = os.getenv("AUTORESUB", "0") == "1"
 
 
+RESUBSCRIBE_BUTTONS = [
+    {
+        "type": "button",
+        "text": {"type": "plain_text", "text": "Android 1"},
+        "url": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/28c2317153d09300_image.png",
+        "action_id": "resub-android-1",
+    },
+    {
+        "type": "button",
+        "text": {"type": "plain_text", "text": "Android 2"},
+        "url": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/3d1de1c4f5ff79e8_image.png",
+        "action_id": "resub-android-2",
+    },
+    {
+        "type": "button",
+        "text": {"type": "plain_text", "text": "iOS 1"},
+        "url": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/687ac68ccaf302c8_image.png",
+        "action_id": "resub-ios-1",
+    },
+    {
+        "type": "button",
+        "text": {"type": "plain_text", "text": "iOS 2"},
+        "url": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/7d266fdd2d371ecf_image.png",
+        "action_id": "resub-ios-2",
+    },
+    {
+        "type": "button",
+        "text": {"type": "plain_text", "text": "Desktop"},
+        "url": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/a8fff71c263667e4_image.png",
+        "action_id": "resub-desktop",
+    },
+]
+
+
+@app.action(re.compile(r"^resub-"))
+async def handle_resub_link_buttons(ack: AsyncAck):
+    await ack()
+
+
 @app.action("unsubber")
 async def handle_unsubscribe_ack(
     ack: AsyncAck, body: dict[str, Any], logger: logging.Logger
@@ -293,12 +332,18 @@ async def handle_unsubscribe_ack(
         channel=target_channel,
         text=f"<@{unsubscribe_people.get(thread_ts)}> RESUBSCRIBE\n_(use “turn off notifications for replies” instead)_",
         thread_ts=thread_ts,
-        attachments=[
+        blocks=[
             {
-                "fallback": "resubscribe how to",
-                "image_url": "https://files.catbox.moe/k5sxwv.jpg",
-                "alt_text": "resubscribe how to",
-            }
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"<@{unsubscribe_people.get(thread_ts)}> RESUBSCRIBE\n_(use “turn off notifications for replies” instead)_",
+                },
+            },
+            {
+                "type": "actions",
+                "elements": RESUBSCRIBE_BUTTONS,
+            },
         ],
     )
     handled_unsub_actions.add(payload_value)
@@ -347,12 +392,18 @@ async def handle_message_events(
                 channel=channel,
                 text=f"<@{user_id}> RESUBSCRIBE\n_(use “turn off notifications for replies” instead)_",
                 thread_ts=thread_ts,
-                attachments=[
+                blocks=[
                     {
-                        "fallback": "resubscribe how to",
-                        "image_url": "https://files.catbox.moe/k5sxwv.jpg",
-                        "alt_text": "resubscribe how to",
-                    }
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": f"<@{user_id}> RESUBSCRIBE\n_(use “turn off notifications for replies” instead)_",
+                        },
+                    },
+                    {
+                        "type": "actions",
+                        "elements": RESUBSCRIBE_BUTTONS,
+                    },
                 ],
             )
             return
