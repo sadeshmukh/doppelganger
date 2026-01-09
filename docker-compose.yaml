@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: slackpoint-bot
+    container_name: doppelganger-bot
     restart: unless-stopped
     ports:
       - "8080:8080"
