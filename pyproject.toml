@@ -8,5 +8,6 @@ dependencies = [
     "aiohttp>=3.13.2",
     "openai>=2.14.0",
     "slack-bolt>=1.27.0",
+    "user-agents>=2.2.0",
     "zalgolib>=0.2.2",
 ]

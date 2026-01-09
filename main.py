@@ -6,6 +6,8 @@ from typing import Any
 from zalgolib.zalgolib import enzalgofy
 import re
 import aiohttp
+from aiohttp import web
+from user_agents import parse as parse_ua
 
 from slack_bolt.adapter.socket_mode.aiohttp import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncAck, AsyncApp
@@ -31,6 +33,7 @@ app.logger.setLevel(logging.INFO)
 user_client: AsyncWebClient = AsyncWebClient(token=_env("SLACK_XOXP"))
 OWNER_USER_ID = "U08PUHSMW4V"
 NOTIF_CHANNEL_ID = _env("NOTIF_CHANNEL_ID")
+RESUB_SITE_URL = os.getenv("RESUB_SITE_URL", "http://localhost:8080")
 # event type user
 
 
@@ -252,43 +255,88 @@ handled_unsub_actions: set[str] = set()
 AUTORESUB = os.getenv("AUTORESUB", "0") == "1"
 
 
-RESUBSCRIBE_BUTTONS = [
-    {
-        "type": "button",
-        "text": {"type": "plain_text", "text": "Android 1"},
-        "url": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/28c2317153d09300_image.png",
-        "action_id": "resub-android-1",
-    },
-    {
-        "type": "button",
-        "text": {"type": "plain_text", "text": "Android 2"},
-        "url": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/3d1de1c4f5ff79e8_image.png",
-        "action_id": "resub-android-2",
-    },
-    {
-        "type": "button",
-        "text": {"type": "plain_text", "text": "iOS 1"},
-        "url": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/687ac68ccaf302c8_image.png",
-        "action_id": "resub-ios-1",
-    },
-    {
-        "type": "button",
-        "text": {"type": "plain_text", "text": "iOS 2"},
-        "url": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/7d266fdd2d371ecf_image.png",
-        "action_id": "resub-ios-2",
-    },
-    {
-        "type": "button",
-        "text": {"type": "plain_text", "text": "Desktop"},
-        "url": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/a8fff71c263667e4_image.png",
-        "action_id": "resub-desktop",
-    },
-]
+RESUB_IMAGES = {
+    "android": [
+        "https://hc-cdn.hel1.your-objectstorage.com/s/v3/28c2317153d09300_image.png",
+        "https://hc-cdn.hel1.your-objectstorage.com/s/v3/3d1de1c4f5ff79e8_image.png",
+    ],
+    "ios": [
+        "https://hc-cdn.hel1.your-objectstorage.com/s/v3/687ac68ccaf302c8_image.png",
+        "https://hc-cdn.hel1.your-objectstorage.com/s/v3/7d266fdd2d371ecf_image.png",
+    ],
+    "desktop": [
+        "https://hc-cdn.hel1.your-objectstorage.com/s/v3/a8fff71c263667e4_image.png",
+    ],
+}
 
 
-@app.action(re.compile(r"^resub-"))
-async def handle_resub_link_buttons(ack: AsyncAck):
-    await ack()
+def _html_page(
+    title: str, images: list[str], other_links: list[tuple[str, str]]
+) -> str:
+    imgs_html = "\n".join(
+        f'<img src="{url}" style="max-width:100%;height:auto;margin-bottom:20px;">'
+        for url in images
+    )
+    links_html = " | ".join(
+        f'<a href="{href}">{label}</a>' for label, href in other_links
+    )
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>{title}</title>
+    <style>
+        body {{ font-family: system-ui, sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; text-align: center; }}
+        img {{ display: block; margin: 20px auto; border: 1px solid #ccc; border-radius: 8px; }}
+        nav {{ margin-bottom: 30px; }}
+        nav a {{ margin: 0 10px; }}
+    </style>
+</head>
+<body>
+    <h1>{title}</h1>
+    <nav>{links_html}</nav>
+    {imgs_html}
+</body>
+</html>
+"""
+
+
+async def _handle_resub_root(request: web.Request) -> web.Response:
+    ua_string = request.headers.get("User-Agent", "")
+    ua = parse_ua(ua_string)
+    if ua.is_mobile:
+        if ua.os.family == "iOS":
+            raise web.HTTPFound("/ios")
+        raise web.HTTPFound("/android")
+    raise web.HTTPFound("/desktop")
+
+
+async def _handle_resub_android(request: web.Request) -> web.Response:
+    html = _html_page(
+        "How to Unsubscribe (Android)",
+        RESUB_IMAGES["android"],
+        [("iOS", "/ios"), ("Desktop", "/desktop")],
+    )
+    return web.Response(text=html, content_type="text/html")
+
+
+async def _handle_resub_ios(request: web.Request) -> web.Response:
+    html = _html_page(
+        "How to Unsubscribe (iOS)",
+        RESUB_IMAGES["ios"],
+        [("Android", "/android"), ("Desktop", "/desktop")],
+    )
+    return web.Response(text=html, content_type="text/html")
+
+
+async def _handle_resub_desktop(request: web.Request) -> web.Response:
+    html = _html_page(
+        "How to Unsubscribe (Desktop)",
+        RESUB_IMAGES["desktop"],
+        [("Android", "/android"), ("iOS", "/ios")],
+    )
+    return web.Response(text=html, content_type="text/html")
 
 
 @app.action("unsubber")
@@ -328,36 +376,34 @@ async def handle_unsubscribe_ack(
             )
         return
 
+    source_link = f"https://hackclub.slack.com/archives/{target_channel}/p{thread_ts.replace('.', '')}"
     await user_client.chat_postMessage(
         channel=target_channel,
-        text=f"<@{unsubscribe_people.get(thread_ts)}> RESUBSCRIBE\n_(use “turn off notifications for replies” instead)_",
+        text=f'<@{unsubscribe_people.get(thread_ts)}> RESUBSCRIBE\n_(use "turn off notifications for replies" instead)_\nSee how: {RESUB_SITE_URL}',
         thread_ts=thread_ts,
         blocks=[
             {
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": f"<@{unsubscribe_people.get(thread_ts)}> RESUBSCRIBE\n_(use “turn off notifications for replies” instead)_",
+                    "text": f'<{source_link}|Source thread>\n\n<@{unsubscribe_people.get(thread_ts)}> RESUBSCRIBE\n_(use "turn off notifications for replies" instead)_\n<{RESUB_SITE_URL}|See how>',
                 },
-            },
-            {
-                "type": "actions",
-                "elements": RESUBSCRIBE_BUTTONS,
             },
         ],
     )
     handled_unsub_actions.add(payload_value)
     if notif_channel and notif_ts:
+        handled_link = f"https://hackclub.slack.com/archives/{target_channel}/p{thread_ts.replace('.', '')}"
         await app.client.chat_update(
             channel=notif_channel,
             ts=notif_ts,
-            text=f"UNSUBSCRIBE handled over [here](https://hackclub.slack.com/archives/{notif_channel}/p{notif_ts.replace('.', '')}).",
+            text=f"UNSUBSCRIBE handled over here: {handled_link}",
             blocks=[
                 {
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": f"UNSUBSCRIBE handled over [here](https://hackclub.slack.com/archives/{notif_channel}/p{notif_ts.replace('.', '')}).",
+                        "text": f"UNSUBSCRIBE handled over <{handled_link}|here>.",
                     },
                 }
             ],
@@ -390,32 +436,29 @@ async def handle_message_events(
         if AUTORESUB:
             await user_client.chat_postMessage(
                 channel=channel,
-                text=f"<@{user_id}> RESUBSCRIBE\n_(use “turn off notifications for replies” instead)_",
+                text=f'<@{user_id}> RESUBSCRIBE\n_(use "turn off notifications for replies" instead)_\nSee how: {RESUB_SITE_URL}',
                 thread_ts=thread_ts,
                 blocks=[
                     {
                         "type": "section",
                         "text": {
                             "type": "mrkdwn",
-                            "text": f"<@{user_id}> RESUBSCRIBE\n_(use “turn off notifications for replies” instead)_",
+                            "text": f'<@{user_id}> RESUBSCRIBE\n_(use "turn off notifications for replies" instead)_\n<{RESUB_SITE_URL}|See how>',
                         },
-                    },
-                    {
-                        "type": "actions",
-                        "elements": RESUBSCRIBE_BUTTONS,
                     },
                 ],
             )
             return
+        source_link = f"https://hackclub.slack.com/archives/{channel}/p{thread_ts.replace('.', '')}"
         await app.client.chat_postMessage(
             channel=NOTIF_CHANNEL_ID,
-            text="someone UNSUBSCRIBED!",
+            text=f"<@{user_id}> UNSUBSCRIBED in {source_link}",
             blocks=[
                 {
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": f"someone *UNSUBSCRIBED!* <@{OWNER_USER_ID}>",
+                        "text": f"<@{user_id}> *UNSUBSCRIBED!* <{source_link}|source> <@{OWNER_USER_ID}>",
                     },
                 },
                 {
@@ -639,6 +682,19 @@ async def main() -> None:
         raise RuntimeError("auth_test did not return user_id")
     os.environ["SLACK_BOT_USER_ID"] = user_id
     logging.info(f"Running with user ID: {user_id}")
+
+    web_app = web.Application()
+    web_app.router.add_get("/", _handle_resub_root)
+    web_app.router.add_get("/android", _handle_resub_android)
+    web_app.router.add_get("/ios", _handle_resub_ios)
+    web_app.router.add_get("/desktop", _handle_resub_desktop)
+
+    web_port = int(os.getenv("WEB_PORT", "8080"))
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", web_port)
+    await site.start()
+    logging.info(f"Resub site running on port {web_port}")
 
     handler: AsyncSocketModeHandler = AsyncSocketModeHandler(
         app, _env("SLACK_APP_TOKEN")
