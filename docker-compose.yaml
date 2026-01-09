@@ -1,5 +1,5 @@
 services:
-  slackpoint:
+  doppelganger:
     build:
       context: .
       dockerfile: Dockerfile
