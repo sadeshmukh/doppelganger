@@ -350,6 +350,7 @@ async def handle_unsubscribe_ack(
 
     target_channel = unsub_context.get("channel")
     thread_ts = unsub_context.get("thread_ts")
+    unsub_msg_ts = unsub_context.get("unsub_msg_ts")
     if not target_channel or not thread_ts:
         return
 
@@ -376,8 +377,7 @@ async def handle_unsubscribe_ack(
             )
         return
 
-    source_link = f"https://hackclub.slack.com/archives/{target_channel}/p{thread_ts.replace('.', '')}"
-    await user_client.chat_postMessage(
+    resub_response = await user_client.chat_postMessage(
         channel=target_channel,
         text=f'<@{unsubscribe_people.get(thread_ts)}> RESUBSCRIBE\n_(use "turn off notifications for replies" instead)_\nSee how: {RESUB_SITE_URL}',
         thread_ts=thread_ts,
@@ -386,24 +386,34 @@ async def handle_unsubscribe_ack(
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": f'<{source_link}|Source thread>\n\n<@{unsubscribe_people.get(thread_ts)}> RESUBSCRIBE\n_(use "turn off notifications for replies" instead)_\n<{RESUB_SITE_URL}|See how>',
+                    "text": f'<@{unsubscribe_people.get(thread_ts)}> RESUBSCRIBE\n_(use "turn off notifications for replies" instead)_\n<{RESUB_SITE_URL}|See how>',
                 },
             },
         ],
     )
     handled_unsub_actions.add(payload_value)
+    resub_ts = resub_response.get("ts", "") if resub_response else ""
     if notif_channel and notif_ts:
-        handled_link = f"https://hackclub.slack.com/archives/{target_channel}/p{thread_ts.replace('.', '')}"
+        unsub_link = (
+            f"https://hackclub.slack.com/archives/{target_channel}/p{unsub_msg_ts.replace('.', '')}"
+            if unsub_msg_ts
+            else ""
+        )
+        handled_link = (
+            f"https://hackclub.slack.com/archives/{target_channel}/p{resub_ts.replace('.', '')}"
+            if resub_ts
+            else ""
+        )
         await app.client.chat_update(
             channel=notif_channel,
             ts=notif_ts,
-            text=f"UNSUBSCRIBE handled over here: {handled_link}",
+            text=f"UNSUBSCRIBE detected: {unsub_link} | handled: {handled_link}",
             blocks=[
                 {
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": f"UNSUBSCRIBE handled over <{handled_link}|here>.",
+                        "text": f"UNSUBSCRIBE <{unsub_link}|detected> and <{handled_link}|handled>.",
                     },
                 }
             ],
@@ -432,7 +442,10 @@ async def handle_message_events(
     # thread replies from not me
     if text == "UNSUBSCRIBE":
         unsubscribe_people[thread_ts] = user_id
-        action_value = json.dumps({"channel": channel, "thread_ts": thread_ts})
+        unsub_msg_ts = event.get("ts")
+        action_value = json.dumps(
+            {"channel": channel, "thread_ts": thread_ts, "unsub_msg_ts": unsub_msg_ts}
+        )
         if AUTORESUB:
             await user_client.chat_postMessage(
                 channel=channel,
@@ -449,16 +462,16 @@ async def handle_message_events(
                 ],
             )
             return
-        source_link = f"https://hackclub.slack.com/archives/{channel}/p{thread_ts.replace('.', '')}"
+        unsub_link = f"https://hackclub.slack.com/archives/{channel}/p{unsub_msg_ts.replace('.', '')}"
         await app.client.chat_postMessage(
             channel=NOTIF_CHANNEL_ID,
-            text=f"<@{user_id}> UNSUBSCRIBED in {source_link}",
+            text=f"<@{user_id}> UNSUBSCRIBED in {unsub_link}",
             blocks=[
                 {
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": f"<@{user_id}> *UNSUBSCRIBED!* <{source_link}|source> <@{OWNER_USER_ID}>",
+                        "text": f"<@{user_id}> *UNSUBSCRIBED!* <{unsub_link}|source> <@{OWNER_USER_ID}>",
                     },
                 },
                 {
