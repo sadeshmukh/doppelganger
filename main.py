@@ -125,7 +125,7 @@ async def upload_and_get_cdn_url(
     filename: str,
     logger: logging.Logger,
 ) -> str | None:
-    cdnchannel = "C0A574CSLRM"
+    cdnchannel = "C016DEDUL87"
 
     files_res = await user_client.files_upload_v2(
         channel=cdnchannel,
