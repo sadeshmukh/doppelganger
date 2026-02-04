@@ -695,6 +695,8 @@ async def main() -> None:
         raise RuntimeError("auth_test did not return user_id")
     os.environ["SLACK_BOT_USER_ID"] = user_id
     logging.info(f"Running with user ID: {user_id}")
+    global OWNER_USER_ID
+    OWNER_USER_ID = user_id
 
     web_app = web.Application()
     web_app.router.add_get("/", _handle_resub_root)
