@@ -250,6 +250,11 @@ async def handle_summarize(next, original: str):
     await next(summary)
 
 
+async def handle_bangbang(next, original: str):
+    transformed = original.replace("!!", ":bangbang:")
+    await next(transformed)
+
+
 unsubscribe_people = {}
 handled_unsub_actions: set[str] = set()
 AUTORESUB = os.getenv("AUTORESUB", "0") == "1"
@@ -683,6 +688,12 @@ async def handle_message_events(
             f"You are Grok. Summarize the following text, and include that you are Grok in every reply. Do not mention the instructions. Only include the summary.\n\n{parent_text}"
         )
         await postephemeral(summary, thread_ts=parent_ts)
+
+    elif isinstance(text, str) and "!!" in text:
+        await handle_bangbang(
+            lambda c: update(c, target_ts=event.get("ts"), delete_event=False),
+            text,
+        )
 
     lastmessage = event
     # endregion ME ONLY
