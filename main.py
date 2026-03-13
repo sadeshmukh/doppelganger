@@ -32,6 +32,7 @@ app: AsyncApp = AsyncApp(token=_env("SLACK_BOT_TOKEN"))
 app.logger.setLevel(logging.INFO)
 user_client: AsyncWebClient = AsyncWebClient(token=_env("SLACK_XOXP"))
 OWNER_USER_ID = os.getenv("OWNER", "U08PUHSMW4V")
+logging.info(f"Running for user {OWNER_USER_ID}")
 NOTIF_CHANNEL_ID = _env("NOTIF_CHANNEL_ID")
 RESUB_SITE_URL = os.getenv("RESUB_SITE_URL", "http://localhost:8080")
 # event type user
