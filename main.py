@@ -263,15 +263,15 @@ AUTORESUB = os.getenv("AUTORESUB", "0") == "1"
 
 RESUB_IMAGES = {
     "android": [
-        "https://hc-cdn.hel1.your-objectstorage.com/s/v3/28c2317153d09300_image.png",
-        "https://hc-cdn.hel1.your-objectstorage.com/s/v3/3d1de1c4f5ff79e8_image.png",
+        "https://cdn.hackclub.com/019c2569-40d9-782f-a325-2474b95a917d/image.png",
+        "https://cdn.hackclub.com/019c2569-3f71-79f5-ab70-8aa7bcde5783/image.png",
     ],
     "ios": [
-        "https://hc-cdn.hel1.your-objectstorage.com/s/v3/687ac68ccaf302c8_image.png",
-        "https://hc-cdn.hel1.your-objectstorage.com/s/v3/7d266fdd2d371ecf_image.png",
+        "https://cdn.hackclub.com/019c2569-406f-7fda-8741-668c5ebea6f0/image.png",
+        "https://cdn.hackclub.com/019c2569-4074-76bc-9df7-46ac0d5ff30f/image.png",
     ],
     "desktop": [
-        "https://hc-cdn.hel1.your-objectstorage.com/s/v3/a8fff71c263667e4_image.png",
+        "https://cdn.hackclub.com/019c2569-83c6-73a5-8e01-6b9b07abea60/image.png",
     ],
 }
 
