@@ -271,7 +271,7 @@ RESUB_IMAGES = {
         "https://cdn.hackclub.com/019c2569-4074-76bc-9df7-46ac0d5ff30f/image.png",
     ],
     "desktop": [
-        "https://cdn.hackclub.com/019c2569-83c6-73a5-8e01-6b9b07abea60/image.png",
+        "https://cdn.hackclub.com/019c2569-7dc7-7dfd-aa58-c640df0fcfac/image.png",
     ],
 }
 
