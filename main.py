@@ -808,7 +808,7 @@ async def handle_reaction_added(
     else:
         update_text = f"Reminding you at {f}."
 
-    context = f"\n\n{len(r['users']) - 1} other{'s' if len(r['users'] > 3) else ''} will also be reminded."
+    context = f"\n\n{len(r['users']) - 1} other{'s' if len(r['users']) > 3 else ''} will also be reminded."
 
     await user_client.chat_update(
         channel=event.get("item", {}).get("channel"),
