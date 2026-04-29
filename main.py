@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from typing import Any
 from zalgolib.zalgolib import enzalgofy
 import re
@@ -37,7 +38,12 @@ NOTIF_CHANNEL_ID = _env("NOTIF_CHANNEL_ID")
 RESUB_SITE_URL = os.getenv("RESUB_SITE_URL", "http://localhost:8080")
 # event type user
 
+remind_client = AsyncApp(token=_env("REMIND_BOT_TOKEN")).client
+
 lastmessage: dict[str, Any] | None = None
+
+reminders: dict[str, dict] = {}  # og_ts -> {users, og_ts, when, link}
+
 
 IMAGE_URL_REGEX = re.compile(
     r"(https?://[^\s]+(?:jpg|jpeg|png|gif|bmp|webp|tiff|svg))",
@@ -555,6 +561,7 @@ async def handle_message_events(
         unfurl_links: bool = False,
         unfurl_media: bool = False,
         thread_ts: str | None = None,  # accepted for interface parity; not used
+        context: str | None = None,
     ) -> None:
         ts_to_update = target_ts or lm_ts
         if not ts_to_update:
@@ -703,8 +710,152 @@ async def handle_message_events(
     elif isinstance(text, str) and text in ["bangbang", "!!"]:
         await update(lastmessagetext + " :bangbang:")
 
+    elif lower_text.startswith("!remindme"):
+        logging.info("remindme: begin")
+        remind_time = lower_text.split("!remindme", 1)[1].strip()
+        # e.g. 1d, 100d
+        match = re.match(r"(\d+)([mhd])", remind_time)
+        if not match or not match.groups():
+            await postephemeral("remindme not valid?")
+            lastmessage = event
+            return
+        amount, unit = match.groups()
+        if not amount.isdigit() or unit not in "mhd":
+            await postephemeral("???")
+            lastmessage = event
+            return
+        amount = int(amount)
+        sec = amount * 60 * (1 if unit == "m" else 60 if unit == "h" else 60 * 24)
+        link = f"https://hackclub.slack.com/archives/{channel}/p{event.get('ts', '').replace('.', '')}"
+        when = time.time() + sec
+        formatted_time = f"<!date^{int(when)}^{{time}}|{amount}{unit}>"
+        reminders[event.get("ts")] = {
+            "users": [user_id],
+            "og_ts": event.get("ts"),
+            "when": when,
+            "link": link,
+            "formatted": formatted_time,
+        }
+
+        update_text = ""
+
+        if len(lower_text.split()) > 2:
+            remindtext = " ".join(lower_text.split()[2:])
+            reminders[event.get("ts")]["text"] = remindtext
+            update_text = f"Reminding you at {formatted_time}: `{remindtext}`"
+        else:
+            update_text = f"Reminding you at {formatted_time}."
+
+        context = f"\n\n React :check-check: to also be reminded."
+        logging.info(
+            await user_client.reactions_add(
+                channel=channel, name="check-check", timestamp=event.get("ts")
+            )
+        )
+        await user_client.chat_update(
+            channel=channel,
+            ts=event.get("ts"),
+            blocks=[
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": update_text},
+                },
+                {
+                    "type": "context",
+                    "elements": [
+                        {
+                            "type": "image",
+                            "image_url": "https://pbs.twimg.com/profile_images/625633822235693056/lNGUneLX_400x400.jpg",
+                            "alt_text": "highly relevant cat",
+                        },
+                        {"type": "mrkdwn", "text": context},
+                    ],
+                },
+            ],
+        )
+
     lastmessage = event
     # endregion ME ONLY
+
+
+@app.event("reaction_added")
+async def handle_reaction_added(
+    body: dict[str, Any], ack: AsyncAck, logger: logging.Logger
+):
+    await ack()
+
+    event = body.get("event", {})
+    reaction = event.get("reaction")
+
+    og_ts = event.get("item", {}).get("ts")
+
+    if reaction != "check-check" or not og_ts:
+        return
+
+    if og_ts not in reminders:
+        return
+
+    r = reminders[og_ts]
+
+    if event.get("user") in r["users"]:
+        return
+
+    r["users"].append(event.get("user"))
+    f = r.get("formatted")
+
+    if r.get("text"):
+        update_text = f"Reminding you at {f}: `{r.get("text")}`"
+    else:
+        update_text = f"Reminding you at {f}."
+
+    context = f"\n\n{len(r['users']) - 1} other{'s' if len(r['users'] > 3) else ''} will also be reminded."
+
+    await user_client.chat_update(
+        channel=event.get("item", {}).get("channel"),
+        ts=event.get("item", {}).get("ts"),
+        blocks=[
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": update_text},
+            },
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "image",
+                        "image_url": "https://pbs.twimg.com/profile_images/625633822235693056/lNGUneLX_400x400.jpg",
+                        "alt_text": "highly relevant cat",
+                    },
+                    {"type": "mrkdwn", "text": context},
+                ],
+            },
+        ],
+    )
+
+    # update og
+
+
+async def periodic():
+    while True:
+        now = time.time()
+        to_remove = []
+        for og_ts, r in reminders.items():
+            if now >= r["when"]:
+                logging.info("IT'S TIME")
+                for user in r["users"]:
+                    await remind_client.chat_postMessage(
+                        channel=user,
+                        text=f"You asked me to remind you: `{r.get('text', '')}`\n{r['link']}",
+                    )
+                await user_client.chat_update(
+                    channel=r["link"].split("/")[4],
+                    ts=r["og_ts"],
+                    text=f"reminder sent: `{r.get('text')}` \n\n{len(r['users'])} reminder(s) were sent.",
+                )
+                to_remove.append(og_ts)
+        for og_ts in to_remove:
+            del reminders[og_ts]
+        await asyncio.sleep(30)
 
 
 async def main() -> None:
@@ -716,6 +867,8 @@ async def main() -> None:
     logging.info(f"Running with user ID: {user_id}")
 
     # this user id is the bot user
+
+    asyncio.create_task(periodic())
 
     web_app = web.Application()
     web_app.router.add_get("/", _handle_resub_root)
