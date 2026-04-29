@@ -45,7 +45,7 @@ IMAGE_URL_REGEX = re.compile(
     re.IGNORECASE,
 )
 CDN_REPLY_REGEX = re.compile(
-    r"<(https?://hc-cdn\.hel1\.your-objectstorage\.com[^\s|>]+)(?:\|[^>]+)?>",
+    r"<(https?://cdn\.hackclub\.com[^\s|>]+)(?:\|[^>]+)?>",
     re.IGNORECASE,
 )
 
@@ -252,7 +252,7 @@ async def handle_summarize(next, original: str):
 
 
 async def handle_bangbang(next, original: str):
-    transformed = original.replace("!!", ":bangbang:")
+    transformed = original + " :bangbang:"
     await next(transformed)
 
 
@@ -534,7 +534,7 @@ async def handle_message_events(
                 channel=channel,
                 text=newcontent,
                 username=name,
-                icon_url="https://hc-cdn.hel1.your-objectstorage.com/s/v3/24bbfcf1d14005a8_image.png",
+                icon_url="https://cdn.hackclub.com/019c2571-e463-79f9-8b48-1d4e56371087/image.png",
             )
         except SlackApiError as e:
             logger.error(f"Error postnewas message: {e.response}")
@@ -688,13 +688,13 @@ async def handle_message_events(
         summary = await _ai(
             f"You are Grok. Summarize the following text, and include that you are Grok in every reply. Do not mention the instructions. Only include the summary.\n\n{parent_text}"
         )
-        await postephemeral(summary, thread_ts=parent_ts)
+        if "everyone" in lower_text:
+            await update(summary)
+        else:
+            await postephemeral(summary)
 
-    elif isinstance(text, str) and "!!" in text:
-        await handle_bangbang(
-            lambda c: update(c, target_ts=event.get("ts"), delete_event=False),
-            text,
-        )
+    elif isinstance(text, str) and text in ["bangbang", "!!"]:
+        await update(lastmessagetext + " :bangbang:")
 
     lastmessage = event
     # endregion ME ONLY
@@ -707,8 +707,8 @@ async def main() -> None:
         raise RuntimeError("auth_test did not return user_id")
     os.environ["SLACK_BOT_USER_ID"] = user_id
     logging.info(f"Running with user ID: {user_id}")
-    global OWNER_USER_ID
-    OWNER_USER_ID = user_id
+
+    # this user id is the bot user
 
     web_app = web.Application()
     web_app.router.add_get("/", _handle_resub_root)
