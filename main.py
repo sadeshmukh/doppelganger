@@ -37,7 +37,6 @@ NOTIF_CHANNEL_ID = _env("NOTIF_CHANNEL_ID")
 RESUB_SITE_URL = os.getenv("RESUB_SITE_URL", "http://localhost:8080")
 # event type user
 
-
 lastmessage: dict[str, Any] | None = None
 
 IMAGE_URL_REGEX = re.compile(
@@ -132,7 +131,7 @@ async def upload_and_get_cdn_url(
         channel=cdnchannel,
         file=img_data,
         filename=filename,
-        initial_comment=f"Automated CDN upload from <#{source_channel}>",
+        initial_comment=f"gib cdn link - <#{source_channel}>",
     )
     if not files_res:
         logger.warning("cdn: upload response empty")
@@ -181,24 +180,32 @@ async def upload_and_get_cdn_url(
         logger.error("cdn: unable to locate upload message after retries")
         return None
 
-    await asyncio.sleep(3)
+    await asyncio.sleep(5)
     logger.info("cdn: fetching replies for ts=%s", ts)
 
     replies_resp = await user_client.conversations_replies(channel=cdnchannel, ts=ts)
     replies = replies_resp.get("messages", []) if replies_resp else []
+
+    def reply_has_cdn(reply) -> bool:
+        blocks = reply.get("blocks", [])
+        if len(blocks) < 2:
+            return False
+        text_block = blocks[1].get("text", {})
+        text = text_block.get("text", "")
+        return "cdn.hackclub.com" in text
+
     found = next(
-        (
-            r
-            for r in replies
-            if "hc-cdn.hel1.your-objectstorage.com" in r.get("text", "")
-        ),
+        (r for r in replies if reply_has_cdn(r)),
         None,
     )
+
     if not found:
         logger.warning("cdn: unable to locate CDN reply message")
         return None
 
-    urlmatch = CDN_REPLY_REGEX.search(found.get("text", ""))
+    urlmatch = CDN_REPLY_REGEX.search(
+        found.get("blocks", [])[1].get("text", {}).get("text", "") if found else ""
+    )
     if not urlmatch:
         logger.info("cdn: reply missing url text=%s", found.get("text", ""))
         return None
