@@ -42,7 +42,23 @@ remind_client = AsyncApp(token=_env("REMIND_BOT_TOKEN")).client
 
 lastmessage: dict[str, Any] | None = None
 
+REMINDERS_FILE = os.getenv("REMINDERS_FILE", "reminders.json")
 reminders: dict[str, dict] = {}  # og_ts -> {users, og_ts, when, link}
+
+
+def _load_reminders() -> dict[str, dict]:
+    try:
+        with open(REMINDERS_FILE) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_reminders() -> None:
+    tmp = REMINDERS_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(reminders, f)
+    os.replace(tmp, REMINDERS_FILE)
 
 
 IMAGE_URL_REGEX = re.compile(
@@ -745,6 +761,7 @@ async def handle_message_events(
             update_text = f"Reminding you at {formatted_time}: `{remindtext}`"
         else:
             update_text = f"Reminding you at {formatted_time}."
+        _save_reminders()
 
         context = f"\n\n React :check-check: to also be reminded."
         logging.info(
@@ -801,6 +818,7 @@ async def handle_reaction_added(
         return
 
     r["users"].append(event.get("user"))
+    _save_reminders()
     f = r.get("formatted")
 
     if r.get("text"):
@@ -855,10 +873,16 @@ async def periodic():
                 to_remove.append(og_ts)
         for og_ts in to_remove:
             del reminders[og_ts]
+        if to_remove:
+            _save_reminders()
         await asyncio.sleep(30)
 
 
 async def main() -> None:
+    global reminders
+    reminders = _load_reminders()
+    logging.info("Loaded %d reminder(s) from %s", len(reminders), REMINDERS_FILE)
+
     auth = await app.client.auth_test()
     user_id = auth.get("user_id")
     if not isinstance(user_id, str) or not user_id:
