@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -14,6 +15,8 @@ from slack_bolt.adapter.socket_mode.aiohttp import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncAck, AsyncApp
 from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_client import AsyncWebClient
+
+from latex import gen_latex_png
 
 from openai import AsyncOpenAI
 
@@ -790,6 +793,34 @@ async def handle_message_events(
                 },
             ],
         )
+
+    elif text and text[0] == "$" and text[-1] == "$" and len(text) > 2:
+        logger.info(f"rendering tex: {text[1:-1]}")
+        img_bytes = gen_latex_png(text[1:-1])
+        if img_bytes:
+            try:
+                # thread?
+                if event.get("thread_ts"):
+                    fr = await user_client.files_upload_v2(
+                        file=img_bytes.getvalue(),
+                        filename="latex.png",
+                        channel=channel,
+                        thread_ts=event.get("thread_ts"),
+                    )
+                else:
+                    fr = await user_client.files_upload_v2(
+                        file=img_bytes.getvalue(),
+                        filename="latex.png",
+                        channel=channel,
+                    )
+                file_id = fr.get("files", [])[0].get("id")
+                logger.info(f"latex file {file_id}")
+
+                await user_client.chat_delete(channel=channel, ts=event.get("ts"))
+            except SlackApiError as e:
+                logger.error(f"Error uploading LaTeX image: {e.response}")
+        else:
+            await postephemeral("Failed to render LaTeX?")
 
     lastmessage = event
     # endregion ME ONLY

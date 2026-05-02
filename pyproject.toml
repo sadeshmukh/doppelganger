@@ -6,8 +6,10 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "aiohttp>=3.13.2",
+    "cairosvg>=2.9.0",
     "openai>=2.14.0",
     "slack-bolt>=1.27.0",
     "user-agents>=2.2.0",
     "zalgolib>=0.2.2",
+    "ziamath>=0.13",
 ]
