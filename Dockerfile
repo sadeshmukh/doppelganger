@@ -4,6 +4,6 @@ WORKDIR /app
 
 COPY . .
 
-RUN uv sync --frozen
+RUN apk add --no-cache cairo-dev pango-dev && uv sync --frozen
 
 CMD ["uv", "run", "main.py"]
