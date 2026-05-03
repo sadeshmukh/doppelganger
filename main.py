@@ -538,6 +538,35 @@ async def handle_message_events(
 
     logger.info(text)
 
+    if isinstance(text, str) and text.endswith("|"):
+        msg_text = text[:-1].rstrip()
+        channelnames = re.findall(r"#([a-z0-9_-]+)", msg_text)
+        names = {}
+        for c in channelnames:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"https://flaron.halceon.dev/channel/{c}"
+                ) as resp:
+                    j = await resp.json()
+                    if err := j.get("error"):
+                        logger.warning(f"flaron: error fetching channel {c}: {err}")
+                    else:
+                        names[c] = j.get("id", c)
+        for c, n in names.items():
+            msg_text = msg_text.replace(f"#{c}", f"<#{n}>")
+        try:
+            await user_client.chat_update(
+                channel=channel,
+                ts=event.get("ts"),
+                text=msg_text,
+                blocks=[{"type": "markdown", "text": msg_text}],
+            )
+            logger.info("pipe: reformatted message ts=%s", event.get("ts"))
+        except SlackApiError as e:
+            logger.error("pipe: update failed: %s", e.response["error"])
+        lastmessage = event
+        return
+
     if not lastmessage or not isinstance(
         lastmessagetext, str
     ):  # just get off my back pls linter
@@ -600,6 +629,39 @@ async def handle_message_events(
                 await user_client.chat_delete(channel=channel, ts=event.get("ts"))
         except SlackApiError as e:
             logger.error(f"Error editing message: {e.response['error']}")
+
+    async def update_md(
+        newcontent: str,
+        target_ts: str | None = None,
+        delete_event: bool = True,
+        thread_ts: str | None = None,
+        context: str | None = None,
+    ) -> None:
+        ts_to_update = target_ts or lm_ts
+        if not ts_to_update:
+            logger.warning("update_md: missing target ts")
+            return
+
+        try:
+            await user_client.chat_update(
+                channel=channel,
+                ts=ts_to_update,
+                text=newcontent,
+                blocks=[
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": newcontent,
+                        },
+                    }
+                ],
+            )
+            logger.info("update_md: updated ts=%s", ts_to_update)
+            if delete_event and event.get("ts"):
+                await user_client.chat_delete(channel=channel, ts=event.get("ts"))
+        except SlackApiError as e:
+            logger.error(f"Error editing message (md): {e.response['error']}")
 
     async def postephemeral(
         content: str,
@@ -836,8 +898,101 @@ async def handle_reaction_added(
     reaction = event.get("reaction")
 
     og_ts = event.get("item", {}).get("ts")
+    item_channel = event.get("item", {}).get("channel")
 
-    if reaction != "check-check" or not og_ts:
+    if not og_ts:
+        return
+
+    if reaction == "private_channel" and event.get("user") == OWNER_USER_ID:
+        reaction_info = await user_client.reactions_get(
+            channel=item_channel, timestamp=og_ts, full=True
+        )
+        msg = reaction_info.get("message") if reaction_info else None
+        if not msg or msg.get("user") != OWNER_USER_ID:
+            return
+        logger.info(f"private-channel, content: {msg.get('text', '')}")
+        msg_text = msg.get("text", "")
+        # channels from #abcd -> <#ID>
+        channelnames = re.findall(r"#([a-z0-9_-]+)", msg_text)
+        # retrieve from flaron.halceon.dev/channel/id -> name (error: nonexistent tho)"
+        names = {}
+        for c in channelnames:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"https://flaron.halceon.dev/channel/{c}"
+                ) as resp:
+                    j = await resp.json()
+                    if err := j.get("error"):
+                        logger.warning(f"flaron: error fetching channel {c}: {err}")
+                    else:
+                        names[c] = j.get("id", c)
+        for c, n in names.items():
+            msg_text = msg_text.replace(f"#{c}", f"<#{n}>")
+
+        try:
+            await user_client.chat_update(
+                channel=item_channel,
+                ts=og_ts,
+                text=msg_text,
+                blocks=[
+                    {"type": "markdown", "text": msg_text},
+                    # {
+                    #     "type": "context",
+                    #     "elements": [{"type": "plain_text", "text": "(unedited)"}],
+                    # },
+                ],
+            )
+            await user_client.reactions_remove(
+                channel=item_channel, name="private_channel", timestamp=og_ts
+            )
+            logger.info("private-channel: reformatted message ts=%s", og_ts)
+        except SlackApiError as e:
+            logger.error("private-channel: update failed: %s", e.response["error"])
+        return
+
+    if reaction == "private" and event.get("user") == OWNER_USER_ID:
+        reaction_info = await user_client.reactions_get(
+            channel=item_channel, timestamp=og_ts, full=True
+        )
+        msg = reaction_info.get("message") if reaction_info else None
+        if not msg or msg.get("user") != OWNER_USER_ID:
+            return
+        logger.info(f"private, content: {msg.get('text', '')}")
+        msg_text = msg.get("text", "")
+        channelnames = re.findall(r"#([a-z0-9_-]+)", msg_text)
+        names = {}
+        for c in channelnames:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"https://flaron.halceon.dev/channel/{c}"
+                ) as resp:
+                    j = await resp.json()
+                    if err := j.get("error"):
+                        logger.warning(f"flaron: error fetching channel {c}: {err}")
+                    else:
+                        names[c] = j.get("id", c)
+        for c, n in names.items():
+            msg_text = msg_text.replace(f"#{c}", f"<#{n}>")
+
+        try:
+            post_kwargs: dict[str, Any] = {
+                "channel": item_channel,
+                "text": msg_text,
+                "blocks": [{"type": "markdown", "text": msg_text}],
+            }
+            if thread_ts := msg.get("thread_ts"):
+                post_kwargs["thread_ts"] = thread_ts
+            await user_client.chat_postMessage(**post_kwargs)
+            # await user_client.reactions_remove(
+            #     channel=item_channel, name="private", timestamp=og_ts
+            # )
+            await user_client.chat_delete(channel=item_channel, ts=og_ts)
+            logger.info("private: posted new message for ts=%s", og_ts)
+        except SlackApiError as e:
+            logger.error("private: post failed: %s", e.response["error"])
+        return
+
+    if reaction != "check-check":
         return
 
     if og_ts not in reminders:
