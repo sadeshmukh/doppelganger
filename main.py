@@ -888,6 +888,9 @@ async def handle_message_events(
     # endregion ME ONLY
 
 
+rxn_reveal_cache: set[str] = set()  # mwahaha
+
+
 @app.event("reaction_added")
 async def handle_reaction_added(
     body: dict[str, Any], ack: AsyncAck, logger: logging.Logger
@@ -903,51 +906,123 @@ async def handle_reaction_added(
     if not og_ts:
         return
 
-    if reaction == "private_channel" and event.get("user") == OWNER_USER_ID:
-        reaction_info = await user_client.reactions_get(
-            channel=item_channel, timestamp=og_ts, full=True
-        )
-        msg = reaction_info.get("message") if reaction_info else None
-        if not msg or msg.get("user") != OWNER_USER_ID:
-            return
-        logger.info(f"private-channel, content: {msg.get('text', '')}")
-        msg_text = msg.get("text", "")
-        # channels from #abcd -> <#ID>
-        channelnames = re.findall(r"#([a-z0-9_-]+)", msg_text)
-        # retrieve from flaron.halceon.dev/channel/id -> name (error: nonexistent tho)"
-        names = {}
-        for c in channelnames:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"https://flaron.halceon.dev/channel/{c}"
-                ) as resp:
-                    j = await resp.json()
-                    if err := j.get("error"):
-                        logger.warning(f"flaron: error fetching channel {c}: {err}")
-                    else:
-                        names[c] = j.get("id", c)
-        for c, n in names.items():
-            msg_text = msg_text.replace(f"#{c}", f"<#{n}>")
+    if reaction == "private_channel":
+        reacted_by_owner = event.get("user") == OWNER_USER_ID
+        msg: dict[str, Any] | None = None
 
-        try:
-            await user_client.chat_update(
+        if reacted_by_owner and og_ts not in rxn_reveal_cache:
+            reaction_info = await user_client.reactions_get(
+                channel=item_channel, timestamp=og_ts, full=True
+            )
+            msg = reaction_info.get("message") if reaction_info else None
+            if not msg:
+                return
+
+            if msg.get("user") == OWNER_USER_ID:
+                logger.info(f"private-channel, content: {msg.get('text', '')}")
+                msg_text = msg.get("text", "")
+                channelnames = re.findall(r"#([a-z0-9_-]+)", msg_text)
+                names = {}
+                for c in channelnames:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(
+                            f"https://flaron.halceon.dev/channel/{c}"
+                        ) as resp:
+                            j = await resp.json()
+                            if err := j.get("error"):
+                                logger.warning(
+                                    f"flaron: error fetching channel {c}: {err}"
+                                )
+                            else:
+                                names[c] = j.get("id", c)
+                for c, n in names.items():
+                    msg_text = msg_text.replace(f"#{c}", f"<#{n}>")
+                try:
+                    await user_client.chat_update(
+                        channel=item_channel,
+                        ts=og_ts,
+                        text=msg_text,
+                        blocks=[
+                            {"type": "markdown", "text": msg_text},
+                            # {
+                            #     "type": "context",
+                            #     "elements": [{"type": "plain_text", "text": "(unedited)"}],
+                            # },
+                        ],
+                    )
+                    await user_client.reactions_remove(
+                        channel=item_channel, name="private_channel", timestamp=og_ts
+                    )
+                    logger.info("private-channel: reformatted message ts=%s", og_ts)
+                except SlackApiError as e:
+                    logger.error(
+                        "private-channel: update failed: %s", e.response["error"]
+                    )
+                return  # self ends
+
+            rxn_reveal_cache.add(og_ts)
+            await user_client.chat_postEphemeral(
                 channel=item_channel,
-                ts=og_ts,
-                text=msg_text,
-                blocks=[
-                    {"type": "markdown", "text": msg_text},
-                    # {
-                    #     "type": "context",
-                    #     "elements": [{"type": "plain_text", "text": "(unedited)"}],
-                    # },
-                ],
+                user=OWNER_USER_ID,
+                text="revealing mentioned channels!",
+                thread_ts=og_ts,
             )
-            await user_client.reactions_remove(
-                channel=item_channel, name="private_channel", timestamp=og_ts
+
+        if og_ts in rxn_reveal_cache:
+            # I have now had a revelation
+            if msg is None:
+                reaction_info = await user_client.reactions_get(
+                    channel=item_channel, timestamp=og_ts, full=True
+                )
+                msg = reaction_info.get("message") if reaction_info else None
+            if not msg:
+                return
+            msg_text = msg.get("text", "")
+            if not msg_text:
+                logger.info(f"privchannel reveal: no text for {item_channel} {og_ts}")
+                return
+            channels_mentioned = re.findall(r"C[A-Z0-9]{6,}", msg_text)
+            if not channels_mentioned:
+                if reacted_by_owner:
+                    await user_client.chat_postEphemeral(
+                        channel=item_channel,
+                        user=OWNER_USER_ID,
+                        text="no channels here",
+                        thread_ts=og_ts,
+                    )
+                return
+            async with aiohttp.ClientSession() as session:
+
+                async def fetch_name(ch_id: str) -> tuple[str, str | None]:
+                    async with session.get(
+                        f"https://flaron.halceon.dev/cid/{ch_id}"
+                    ) as res:
+                        data = await res.json()
+                        return ch_id, data.get("name")
+
+                results = await asyncio.gather(
+                    *[fetch_name(ch_id) for ch_id in channels_mentioned]
+                )
+            id_to_name = {ch_id: name for ch_id, name in results if name}
+            if not id_to_name:
+                logger.info(
+                    f"privchannel reveal: no names found for {channels_mentioned}"
+                )
+                return
+            pre = (
+                "what channels could they be? these ones: "
+                if len(channels_mentioned) > 1
+                else "what channel could that be? this one: "
             )
-            logger.info("private-channel: reformatted message ts=%s", og_ts)
-        except SlackApiError as e:
-            logger.error("private-channel: update failed: %s", e.response["error"])
+            reveal_text = pre + ", ".join(
+                f"`#{id_to_name.get(cid, cid)}`" for cid in channels_mentioned
+            )
+            await user_client.chat_postEphemeral(
+                channel=item_channel,
+                user=event.get("user"),
+                text=reveal_text,
+                thread_ts=og_ts,
+            )
         return
 
     if reaction == "private" and event.get("user") == OWNER_USER_ID:
