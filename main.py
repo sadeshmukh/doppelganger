@@ -473,6 +473,30 @@ async def handle_message_events(
     if not isinstance(user_id, str):
         return
 
+    for name, paren in re.findall(
+        r"(?:#/?([a-z0-9_-]+)|\(([a-z0-9_-]+)\))", text or ""
+    ):
+        channel_name = name or paren
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"https://flaron.halceon.dev/channel/{channel_name}"
+            ) as resp:
+                j = await resp.json()
+                logging.info(f"flaron: lookup for {channel_name} got {j}")
+
+    if cid_rec := re.findall(r"C0[A-Z0-9]+", text or ""):
+        for cid in cid_rec:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"https://flaron.halceon.dev/channel/{cid}"
+                ) as resp:
+                    if (r := await resp.json()).get(
+                        "error", "nonexistent"
+                    ) == "nonexistent":
+                        logging.info(
+                            f"flaron: channel ID lookup for {cid} got nonexistent!"
+                        )
+
     thread_ts = event.get("thread_ts") or event.get("ts")
     if not thread_ts and user_id != OWNER_USER_ID:
         return
