@@ -16,6 +16,7 @@ services:
       - WEB_PORT=${WEB_PORT:-8080}
       - RESUB_SITE_URL=${RESUB_SITE_URL}
       - REMINDERS_FILE=${REMINDERS_FILE:-./data/reminders.json}
+      - AUTORESP_FILE=${AUTORESP_FILE:-./data/autoresponses.json}
     healthcheck:
       test: ["CMD", "uv", "run", "python", "-c", "import sys; sys.exit(0)"]
       interval: 30s

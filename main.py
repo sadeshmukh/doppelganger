@@ -64,6 +64,25 @@ def _save_reminders() -> None:
     os.replace(tmp, REMINDERS_FILE)
 
 
+AUTORESP_FILE = os.getenv("AUTORESP_FILE", "autoresponses.json")
+autoresponses: dict[str, str] = {}  # trigger -> resp
+
+
+def _load_autoresponses() -> dict[str, str]:
+    try:
+        with open(AUTORESP_FILE) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_autoresponses() -> None:
+    tmp = AUTORESP_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(autoresponses, f)
+    os.replace(tmp, AUTORESP_FILE)
+
+
 IMAGE_URL_REGEX = re.compile(
     r"(https?://[^\s]+(?:jpg|jpeg|png|gif|bmp|webp|tiff|svg))",
     re.IGNORECASE,
@@ -561,6 +580,39 @@ async def handle_message_events(
     lastmessagetext = "" if not lastmessage else lastmessage.get("text")
 
     logger.info(text)
+
+    if event.get("subtype") == "me_message":
+        logger.info("[] autoresp")
+        # reserving this for autoresponses for now, prob should've used only this to begin with?
+        if text.startswith("auto"):
+            parts = text.split(" ")
+            if len(parts) < 3:
+                logging.warning(f"autoresponse: invalid format for auto add? {text}")
+            auto_trig, auto_resp = parts[1], " ".join(parts[2:])
+            autoresponses[auto_trig] = auto_resp
+            _save_autoresponses()
+            await user_client.chat_delete(channel=channel, ts=event.get("ts"))
+        elif isinstance(text, str) and text in autoresponses:
+            response = autoresponses[text]
+            await user_client.chat_delete(channel=channel, ts=event.get("ts"))
+            if event.get("thread_ts") and event.get("thread_ts") != event.get("ts"):
+                await user_client.chat_postMessage(
+                    channel=channel,
+                    text=response,
+                    thread_ts=event.get("thread_ts"),
+                )
+            else:
+                await user_client.chat_postMessage(
+                    channel=channel,
+                    text=response,
+                )
+            logger.info(
+                f"autoresponse: responded to trigger {text}",
+            )
+
+            return
+        else:
+            logger.warning(f"didn't hit any? {text}")
 
     if isinstance(text, str) and text.endswith("|"):
         msg_text = text[:-1].rstrip()
@@ -1164,8 +1216,9 @@ async def periodic():
 
 
 async def main() -> None:
-    global reminders
+    global reminders, autoresponses
     reminders = _load_reminders()
+    autoresponses = _load_autoresponses()
     logging.info("Loaded %d reminder(s) from %s", len(reminders), REMINDERS_FILE)
 
     auth = await app.client.auth_test()
