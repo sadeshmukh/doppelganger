@@ -1044,7 +1044,7 @@ async def handle_reaction_added(
                 thread_ts=og_ts,
             )
 
-        if og_ts in rxn_reveal_cache:
+        if og_ts in rxn_reveal_cache or event.get("item_user") == OWNER_USER_ID:
             # I have now had a revelation
             if msg is None:
                 reaction_info = await user_client.reactions_get(
@@ -1052,6 +1052,9 @@ async def handle_reaction_added(
                 )
                 msg = reaction_info.get("message") if reaction_info else None
             if not msg:
+                logging.warning(
+                    f"revelation couldn't find og message? ts={og_ts} channel={item_channel}"
+                )
                 return
             msg_text = msg.get("text", "")
             if not msg_text:
