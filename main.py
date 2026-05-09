@@ -509,11 +509,9 @@ async def handle_message_events(
                 async with session.get(
                     f"https://flaron.halceon.dev/channel/{cid}"
                 ) as resp:
-                    if (r := await resp.json()).get(
-                        "error", "nonexistent"
-                    ) == "nonexistent":
+                    if (r := await resp.json()).get("error"):
                         logging.info(
-                            f"flaron: channel ID lookup for {cid} got nonexistent!"
+                            f"flaron: channel ID lookup for {cid} got {r.get("error")}!"
                         )
 
     thread_ts = event.get("thread_ts") or event.get("ts")
