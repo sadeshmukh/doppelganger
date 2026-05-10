@@ -1,6 +1,6 @@
 # Doppelganger
 
-A selfbot that does a lot of things.
+A Slack selfbot that does a lot of things.
 
 - summarizer
 - zalgoifier
@@ -9,7 +9,7 @@ A selfbot that does a lot of things.
 - the worst way to CDN images
 - latex rendering
 - persistent autoresponses
-- public reminders
+- public reminders (!remindme)
 - revealing those private channels
   - show those private channels
 - resubscriber! and associated website
@@ -31,4 +31,4 @@ RESUB_SITE_URL=
 REMIND_BOT_TOKEN=xoxb-
 ```
 
-You can run the bot with Docker Compose (`docker compose up -d`) or with `uv run main.py`.
+You can run the bot with Docker Compose (`docker compose up -d`) or with `uv run main.py`. I run it on Coolify.
