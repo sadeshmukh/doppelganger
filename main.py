@@ -757,6 +757,21 @@ async def handle_message_events(
 
     lower_text = text.lower() if isinstance(text, str) else ""
 
+    # Replace trailing "!!" with :bangbang: emoji
+    if isinstance(text, str) and text.endswith("!!") and text != "!!":
+        new_text = text[:-2].rstrip() + " :bangbang:"
+        try:
+            await user_client.chat_update(
+                channel=channel,
+                ts=event.get("ts"),
+                text=new_text,
+            )
+            logger.info("bangbang: updated trailing !! in ts=%s", event.get("ts"))
+        except SlackApiError as e:
+            logger.error("bangbang: update failed: %s", e.response["error"])
+        lastmessage = event
+        return
+
     if "capitalize it" in lower_text and lastmessage:
         await update(lastmessagetext.upper())
 
