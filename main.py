@@ -1090,17 +1090,13 @@ async def handle_reaction_added(
                         f"https://flaron.halceon.dev/cid/{ch_id}"
                     ) as res:
                         data = await res.json()
-                        return ch_id, data.get("name")
+                        name = data.get("name")
+                        return ch_id, name if name and name != "unknown" else None
 
                 results = await asyncio.gather(
                     *[fetch_name(ch_id) for ch_id in channels_mentioned]
                 )
             id_to_name = {ch_id: name for ch_id, name in results if name}
-            if not id_to_name:
-                logger.info(
-                    f"privchannel reveal: no names found for {channels_mentioned}"
-                )
-                return
             pre = (
                 "what channels could they be? these ones: "
                 if len(channels_mentioned) > 1
