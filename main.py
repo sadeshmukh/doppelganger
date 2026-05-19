@@ -607,7 +607,7 @@ async def handle_message_events(
                     thread_ts=event.get("thread_ts") or event.get("ts"),
                 )
             else:
-                lines = [f"`{trig}` → {resp}" for trig, resp in autoresponses.items()]
+                lines = [f"`{trig}` -> {resp}" for trig, resp in autoresponses.items()]
                 await user_client.chat_postEphemeral(
                     channel=channel,
                     user=user_id,
