@@ -582,13 +582,31 @@ async def handle_message_events(
     if event.get("subtype") == "me_message":
         logger.info("[] autoresp")
         # reserving this for autoresponses for now, prob should've used only this to begin with?
-        if text.startswith("auto"):
+        if text.startswith("auto "):
             parts = text.split(" ")
             if len(parts) < 3:
                 logging.warning(f"autoresponse: invalid format for auto add? {text}")
+                return
             auto_trig, auto_resp = parts[1], " ".join(parts[2:])
             autoresponses[auto_trig] = auto_resp
             _save_autoresponses()
+            await user_client.chat_delete(channel=channel, ts=event.get("ts"))
+        elif text == "list":
+            if not autoresponses:
+                await user_client.chat_postEphemeral(
+                    channel=channel,
+                    user=user_id,
+                    text="No autoresponses configured.",
+                    thread_ts=event.get("thread_ts") or event.get("ts"),
+                )
+            else:
+                lines = [f"`{trig}` → {resp}" for trig, resp in autoresponses.items()]
+                await user_client.chat_postEphemeral(
+                    channel=channel,
+                    user=user_id,
+                    text=f"*Autoresponses ({len(autoresponses)}):*\n" + "\n".join(lines),
+                    thread_ts=event.get("thread_ts") or event.get("ts"),
+                )
             await user_client.chat_delete(channel=channel, ts=event.get("ts"))
         elif isinstance(text, str) and text in autoresponses:
             response = autoresponses[text]
