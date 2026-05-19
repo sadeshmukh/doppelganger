@@ -579,19 +579,26 @@ async def handle_message_events(
 
     logger.info(text)
 
+    # Handle both /me commands and normal "me " prefixed messages
+    me_text: str | None = None
     if event.get("subtype") == "me_message":
+        me_text = text
+    elif isinstance(text, str) and text.startswith("me "):
+        me_text = text[3:]
+
+    if me_text is not None:
         logger.info("[] autoresp")
         # reserving this for autoresponses for now, prob should've used only this to begin with?
-        if text.startswith("auto "):
-            parts = text.split(" ")
+        if me_text.startswith("auto "):
+            parts = me_text.split(" ")
             if len(parts) < 3:
-                logging.warning(f"autoresponse: invalid format for auto add? {text}")
+                logging.warning(f"autoresponse: invalid format for auto add? {me_text}")
                 return
             auto_trig, auto_resp = parts[1], " ".join(parts[2:])
             autoresponses[auto_trig] = auto_resp
             _save_autoresponses()
             await user_client.chat_delete(channel=channel, ts=event.get("ts"))
-        elif text == "list":
+        elif me_text == "list":
             if not autoresponses:
                 await user_client.chat_postEphemeral(
                     channel=channel,
@@ -608,8 +615,8 @@ async def handle_message_events(
                     thread_ts=event.get("thread_ts") or event.get("ts"),
                 )
             await user_client.chat_delete(channel=channel, ts=event.get("ts"))
-        elif isinstance(text, str) and text in autoresponses:
-            response = autoresponses[text]
+        elif isinstance(me_text, str) and me_text in autoresponses:
+            response = autoresponses[me_text]
             await user_client.chat_delete(channel=channel, ts=event.get("ts"))
             if event.get("thread_ts") and event.get("thread_ts") != event.get("ts"):
                 await user_client.chat_postMessage(
@@ -623,12 +630,12 @@ async def handle_message_events(
                     text=response,
                 )
             logger.info(
-                f"autoresponse: responded to trigger {text}",
+                f"autoresponse: responded to trigger {me_text}",
             )
 
             return
         else:
-            logger.warning(f"didn't hit any? {text}")
+            logger.warning(f"didn't hit any? {me_text}")
 
     if isinstance(text, str) and text.endswith("|"):
         msg_text = text[:-1].rstrip()
