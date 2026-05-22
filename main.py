@@ -615,6 +615,22 @@ async def handle_message_events(
                     thread_ts=event.get("thread_ts") or event.get("ts"),
                 )
             await user_client.chat_delete(channel=channel, ts=event.get("ts"))
+        elif me_text.startswith("dm "):
+            dm_args = me_text[3:].strip()
+            mention_match = re.match(r"<@([A-Z0-9]+)>\s*(.*)", dm_args, re.DOTALL)
+            if not mention_match:
+                logger.warning(f"dm: invalid format, expected <@USER> message: {dm_args}")
+            else:
+                target_user = mention_match.group(1)
+                dm_message = mention_match.group(2)
+                await user_client.chat_postEphemeral(
+                    channel=channel,
+                    user=target_user,
+                    text=dm_message,
+                    thread_ts=event.get("thread_ts") or event.get("ts"),
+                )
+                await user_client.chat_delete(channel=channel, ts=event.get("ts"))
+            return
         elif isinstance(me_text, str) and me_text in autoresponses:
             response = autoresponses[me_text]
             await user_client.chat_delete(channel=channel, ts=event.get("ts"))
