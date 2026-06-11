@@ -550,7 +550,7 @@ async def handle_message_events(
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": f"<@{user_id}> *UNSUBSCRIBED!* <{unsub_link}|source> <@{OWNER_USER_ID}>",
+                        "text": f"<@{user_id}> *UNSUBSCRIBED!* <{unsub_link}|source>",
                     },
                 },
                 {
@@ -611,7 +611,8 @@ async def handle_message_events(
                 await user_client.chat_postEphemeral(
                     channel=channel,
                     user=user_id,
-                    text=f"*Autoresponses ({len(autoresponses)}):*\n" + "\n".join(lines),
+                    text=f"*Autoresponses ({len(autoresponses)}):*\n"
+                    + "\n".join(lines),
                     thread_ts=event.get("thread_ts") or event.get("ts"),
                 )
             await user_client.chat_delete(channel=channel, ts=event.get("ts"))
