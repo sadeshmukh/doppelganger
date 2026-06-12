@@ -639,7 +639,8 @@ async def handle_message_events(
             logger.warning(f"didn't hit any? {me_text}")
 
     if isinstance(text, str) and text.endswith("|"):
-        msg_text = text[:-1].rstrip()
+        resend = text.endswith("||")
+        msg_text = text[:-2].rstrip() if resend else text[:-1].rstrip()
         channelnames = re.findall(r"#([a-z0-9_-]+)", msg_text)
         names = {}
         for c in channelnames:
@@ -654,16 +655,31 @@ async def handle_message_events(
                         names[c] = j.get("id", c)
         for c, n in names.items():
             msg_text = msg_text.replace(f"#{c}", f"<#{n}>")
-        try:
-            await user_client.chat_update(
-                channel=channel,
-                ts=event.get("ts"),
-                text=msg_text,
-                blocks=[{"type": "markdown", "text": msg_text}],
-            )
-            logger.info("pipe: reformatted message ts=%s", event.get("ts"))
-        except SlackApiError as e:
-            logger.error("pipe: update failed: %s", e.response["error"])
+        if resend:
+            try:
+                post_kwargs: dict[str, Any] = {
+                    "channel": channel,
+                    "text": msg_text,
+                    "blocks": [{"type": "markdown", "text": msg_text}],
+                }
+                if thread_ts := event.get("thread_ts"):
+                    post_kwargs["thread_ts"] = thread_ts
+                await user_client.chat_postMessage(**post_kwargs)
+                await user_client.chat_delete(channel=channel, ts=event.get("ts"))
+                logger.info("pipe: resent message ts=%s", event.get("ts"))
+            except SlackApiError as e:
+                logger.error("pipe: resend failed: %s", e.response["error"])
+        else:
+            try:
+                await user_client.chat_update(
+                    channel=channel,
+                    ts=event.get("ts"),
+                    text=msg_text,
+                    blocks=[{"type": "markdown", "text": msg_text}],
+                )
+                logger.info("pipe: reformatted message ts=%s", event.get("ts"))
+            except SlackApiError as e:
+                logger.error("pipe: update failed: %s", e.response["error"])
         lastmessage = event
         return
 
