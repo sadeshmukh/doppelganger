@@ -489,6 +489,9 @@ async def handle_message_events(
     text = event.get("text")
     channel = event.get("channel")
 
+    if channel in ["G01DBHPLK25", "C07FL3G62LF", "C09A5ADLXKM"]:
+        return
+
     if not isinstance(user_id, str):
         return
 
