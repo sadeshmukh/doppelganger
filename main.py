@@ -10,6 +10,7 @@ import re
 import aiohttp
 from aiohttp import web
 from user_agents import parse as parse_ua
+from rich import print as rprint
 
 from slack_bolt.adapter.socket_mode.aiohttp import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncAck, AsyncApp
@@ -488,6 +489,52 @@ async def handle_message_events(
     user_id = event.get("user")
     text = event.get("text")
     channel = event.get("channel")
+    if event.get("subtype") == "message_deleted":
+
+        msg = event.get(
+            "previous_message"
+        )  # user, ts, text, parent_user_id, thread_ts, client_msg_id (?), deleted_ts
+
+        if msg.get("app_id"):
+            if msg.get("app_id") == "A09Q7LQ3GKX" or msg.get("app_id") == "A0AKUAD1KB3":
+                return
+            logger.info(f"what? bot msg {msg.get('app_id')}")
+
+        og_user = msg.get("user")
+        diff_s = float(event.get("ts")) - float(event.get("deleted_ts"))
+
+        await user_client.chat_postEphemeral(
+            channel=channel,
+            user=OWNER_USER_ID,
+            thread_ts=msg.get("thread_ts", None),
+            blocks=[
+                {
+                    "type": "context",
+                    "elements": [
+                        {
+                            "type": "mrkdwn",
+                            "text": f"Message deleted by <@{og_user}> from {diff_s:.0f}s ago",
+                        }
+                    ],
+                },
+                {
+                    "type": "rich_text",
+                    "elements": [
+                        {
+                            "type": "rich_text_section",
+                            "elements": [
+                                {
+                                    "type": "text",
+                                    "text": msg.get(
+                                        "text", "something broke uhoh :bangbang:"
+                                    ),
+                                }
+                            ],
+                        }
+                    ],
+                },
+            ],
+        )
 
     if channel in ["G01DBHPLK25", "C07FL3G62LF", "C09A5ADLXKM"]:
         return
