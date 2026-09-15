@@ -18,6 +18,7 @@ from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_client import AsyncWebClient
 
 from latex import gen_latex_png
+from userbot import delete_send_to_channel
 
 from openai import AsyncOpenAI
 
@@ -82,6 +83,25 @@ def _save_autoresponses() -> None:
     with open(tmp, "w") as f:
         json.dump(autoresponses, f)
     os.replace(tmp, AUTORESP_FILE)
+
+
+OTHER_FILE = os.getenv("OTHER_FILE", "other.json")
+other: dict[str, Any] = {}
+
+
+def _load_o() -> dict[str, str]:
+    try:
+        with open(OTHER_FILE) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_o() -> None:
+    tmp = OTHER_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(other, f)
+    os.replace(tmp, OTHER_FILE)
 
 
 IMAGE_URL_REGEX = re.compile(
@@ -489,6 +509,11 @@ async def handle_message_events(
     user_id = event.get("user")
     text = event.get("text")
     channel = event.get("channel")
+    if event.get("subtype") == "thread_broadcast":
+        logging.info(event)
+        if other.get("guard") and channel in other.get("guard", []):
+            await delete_send_to_channel(channel, event.get("ts"))
+            logging.info(f"Deleted thread broadcast in guarded channel {channel}")
     if event.get("subtype") == "message_deleted":
 
         msg = event.get(
@@ -1065,6 +1090,34 @@ async def handle_message_events(
         else:
             await postephemeral("Failed to render LaTeX?")
 
+    elif text.startswith("!guard"):
+        cids = re.findall(r"\bC[A-Z0-9]{8,}\b", text)
+        print(cids)
+        if not cids:
+            await user_client.chat_postEphemeral(
+                channel=channel,
+                user=OWNER_USER_ID,
+                text="<#" + ">, <#".join(other.get("guard", [])) + ">",
+            )
+            await user_client.chat_delete(channel=channel, ts=event.get("ts"))
+            return
+        current = other.get("guard", [])
+        for cid in cids:
+            if cid not in current:
+                current.append(cid)
+        other["guard"] = current
+        _save_o()
+        await user_client.chat_delete(channel=channel, ts=event.get("ts"))
+    elif text.startswith("!unguard"):
+        cids = re.findall(r"\bC[A-Z0-9]{8,}\b", text)
+        current = other.get("guard", [])
+        for cid in cids:
+            if cid in current:
+                current.remove(cid)
+        other["guard"] = current
+        _save_o()
+        await user_client.chat_delete(channel=channel, ts=event.get("ts"))
+
     lastmessage = event
     # endregion ME ONLY
 
@@ -1320,9 +1373,10 @@ async def periodic():
 
 
 async def main() -> None:
-    global reminders, autoresponses
+    global reminders, autoresponses, other
     reminders = _load_reminders()
     autoresponses = _load_autoresponses()
+    other = _load_o()
     logging.info("Loaded %d reminder(s) from %s", len(reminders), REMINDERS_FILE)
 
     auth = await app.client.auth_test()
