@@ -509,11 +509,19 @@ async def handle_message_events(
     user_id = event.get("user")
     text = event.get("text")
     channel = event.get("channel")
+
     if event.get("subtype") == "thread_broadcast":
-        logging.info(event)
         if other.get("guard") and channel in other.get("guard", []):
             await delete_send_to_channel(channel, event.get("ts"))
-            logging.info(f"Deleted thread broadcast in guarded channel {channel}")
+            logging.info(f"nuh uh no send to channel {channel}")
+    if (
+        event.get("subtype") == "message_changed"
+        and event.get("message", {}).get("subtype") == "thread_broadcast"
+    ):
+        logging.info(event)
+        if other.get("guard") and channel in other.get("guard", []):
+            await delete_send_to_channel(channel, event.get("message", {}).get("ts"))
+            logging.info(f"nuh uh no send to channel {channel}")
     if event.get("subtype") == "message_deleted":
 
         msg = event.get(
